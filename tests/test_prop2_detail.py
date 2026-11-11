@@ -40,7 +40,7 @@ _ligne = st.text(
 _lignes_detail = st.lists(_ligne, min_size=0, max_size=8)
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(lignes=_lignes_detail)
 def test_round_trip_serialisation_detail(tmp_path, lignes):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

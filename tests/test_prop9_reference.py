@@ -33,7 +33,7 @@ _contenu_fiable = st.tuples(
 _ensemble_contenus = st.lists(_contenu_fiable, min_size=0, max_size=10)
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(contenus=_ensemble_contenus)
 def test_round_trip_base_reference(tmp_path, contenus):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

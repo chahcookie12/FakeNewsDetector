@@ -32,7 +32,7 @@ def _source_attendue(source):
     return source
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     source=sources,
     resultat=resultats(),

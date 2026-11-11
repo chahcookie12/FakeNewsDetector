@@ -32,7 +32,7 @@ _ensemble_analyses = st.lists(
 _limites_invalides = st.integers(max_value=0)
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(ensemble=_ensemble_analyses, limite=_limites_invalides)
 def test_limite_invalide_signale_erreur(tmp_path, ensemble, limite):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

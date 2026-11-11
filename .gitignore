@@ -218,3 +218,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Jeu de données ISOT (fichiers CSV importés localement, non versionnés)
+data/dataset/
+
+# Base de données locale SQLite (générée automatiquement au démarrage)
+data/fakenews.db
+
+# Fichiers système macOS
+.DS_Store
+__MACOSX/
+
+# Éditeur VS Code (settings locaux)
+.vscode/
+
+# Fichier temporaire
+_tmp_exp.py
