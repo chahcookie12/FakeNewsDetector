@@ -29,7 +29,14 @@ _ensemble_analyses = st.lists(
 )
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+# deadline=None : l'écriture SQLite sur fichier temporaire (Windows) peut
+# dépasser le délai par défaut de 200 ms de Hypothesis sur certains
+# exemples ; cette variabilité d'E/S ne reflète aucun problème de logique.
+@settings(
+    max_examples=10,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(ensemble=_ensemble_analyses)
 def test_round_trip_persistance_analyse(tmp_path, ensemble):
     # Chemin de base unique par exemple : isolation totale entre

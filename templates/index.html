@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fake News Detector — ENSIAS</title>
+  <style>
+    /* ===== RESET & BASE ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #F5F0E1;
+      color: #1A2A4A;
+      min-height: 100vh;
+    }
+
+    /* ===== HEADER ===== */
+    header {
+      background: #1A2A4A;
+      color: #F5F0E1;
+      padding: 1.2rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: .3px; }
+    header span { font-size: .8rem; color: #C8963E; font-weight: 600; }
+    #status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #aaa; display: inline-block; margin-right: 6px;
+    }
+    #status-dot.ok { background: #2E7D45; }
+
+    /* ===== LAYOUT ===== */
+    main {
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+      display: grid;
+      gap: 1.5rem;
+    }
+
+    /* ===== CARDS ===== */
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 10px rgba(26,42,74,.08);
+      border-top: 3px solid #C8963E;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1A2A4A;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    /* ===== FORM ===== */
+    input[type="text"], textarea {
+      width: 100%;
+      border: 1.5px solid #E5D3AC;
+      border-radius: 6px;
+      padding: .6rem .8rem;
+      font-size: .95rem;
+      color: #1A2A4A;
+      background: #FDFAF4;
+      transition: border-color .2s;
+      resize: vertical;
+    }
+    input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: #C8963E;
+    }
+    label { font-size: .85rem; font-weight: 600; margin-bottom: .3rem; display: block; color: #2C3E63; }
+    .field { margin-bottom: 1rem; }
+
+    button {
+      background: #1A2A4A;
+      color: #F5F0E1;
+      border: none;
+      border-radius: 6px;
+      padding: .7rem 1.6rem;
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    button:hover { background: #C8963E; }
+    button:disabled { background: #aaa; cursor: default; }
+
+    /* ===== RESULT ===== */
+    #result-card { display: none; }
+
+    .verdict-badge {
+      display: inline-block;
+      padding: .4rem 1.2rem;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: .5px;
+      margin-bottom: .8rem;
+    }
+    .verdict-FAKE    { background: #B23A3A; color: #fff; }
+    .verdict-FIABLE  { background: #2E7D45; color: #fff; }
+    .verdict-DOUTEUX { background: #C8963E; color: #fff; }
+
+    /* Score bar */
+    .score-wrap { margin-bottom: 1rem; }
+    .score-label { font-size: .85rem; font-weight: 600; margin-bottom: .3rem; }
+    .score-bar-bg {
+      background: #E5D3AC; border-radius: 20px; height: 14px; overflow: hidden;
+    }
+    .score-bar-fill {
+      height: 100%; border-radius: 20px;
+      transition: width .6s ease;
+      background: #2E7D45;
+    }
+    .score-bar-fill.low  { background: #B23A3A; }
+    .score-bar-fill.mid  { background: #C8963E; }
+
+    /* Detail list */
+    .detail-list { list-style: none; }
+    .detail-list li {
+      padding: .3rem .5rem;
+      font-size: .88rem;
+      border-left: 3px solid #E5D3AC;
+      margin-bottom: .3rem;
+      background: #FDFAF4;
+      border-radius: 0 4px 4px 0;
+    }
+
+    /* Indicators grid */
+    .ind-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: .6rem;
+      margin-top: .5rem;
+    }
+    .ind-item {
+      background: #F5F0E1;
+      border-radius: 6px;
+      padding: .5rem .8rem;
+      font-size: .82rem;
+    }
+    .ind-item strong { display: block; color: #C8963E; font-size: 1rem; }
+
+    /* Similarity */
+    .sim-item {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      padding: .4rem .6rem;
+      background: #F5F0E1;
+      border-radius: 6px;
+      margin-bottom: .4rem;
+      font-size: .85rem;
+    }
+    .sim-label {
+      font-size: .75rem; font-weight: 700; padding: .2rem .5rem;
+      border-radius: 10px; color: #fff; white-space: nowrap;
+    }
+    .sim-label.fake  { background: #B23A3A; }
+    .sim-label.real  { background: #2E7D45; }
+    .sim-pct { margin-left: auto; font-weight: 700; color: #1A2A4A; }
+
+    /* ===== HISTORY ===== */
+    .hist-item {
+      display: flex;
+      align-items: center;
+      gap: .8rem;
+      padding: .6rem .8rem;
+      border-radius: 6px;
+      background: #F5F0E1;
+      margin-bottom: .5rem;
+    }
+    .hist-verdict {
+      font-size: .75rem; font-weight: 700; padding: .2rem .6rem;
+      border-radius: 10px; color: #fff; white-space: nowrap;
+    }
+    .hist-verdict.FAKE    { background: #B23A3A; }
+    .hist-verdict.FIABLE  { background: #2E7D45; }
+    .hist-verdict.DOUTEUX { background: #C8963E; }
+    .hist-title { flex: 1; font-size: .9rem; font-weight: 600; }
+    .hist-score { font-size: .85rem; color: #2C3E63; font-weight: 700; }
+    .hist-date  { font-size: .78rem; color: #5A5A5A; }
+
+    /* ===== LOADER ===== */
+    .loader { display: none; font-size: .9rem; color: #C8963E; font-weight: 600; margin-top: .5rem; }
+    .loader.show { display: block; }
+
+    /* ===== TABS ===== */
+    .tabs { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+    .tab-btn {
+      padding: .5rem 1.2rem;
+      border-radius: 6px;
+      border: 1.5px solid #C8963E;
+      background: transparent;
+      color: #1A2A4A;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .tab-btn.active, .tab-btn:hover { background: #1A2A4A; color: #F5F0E1; border-color: #1A2A4A; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔍 Fake News Detector</h1>
+  <div>
+    <span id="status-dot"></span>
+    <span id="status-txt" style="font-size:.82rem;color:#E5D3AC">Vérification...</span>
+    &nbsp;&nbsp;
+    <span>ENSIAS — PFA 2025-2026</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('analyse')">Analyser un article</button>
+    <button class="tab-btn" onclick="switchTab('historique')">Historique</button>
+  </div>
+
+  <!-- TAB : ANALYSE -->
+  <div id="tab-analyse" class="tab-panel active">
+
+    <div class="card">
+      <h2>Saisie de l'article</h2>
+      <div class="field">
+        <label for="titre">Titre</label>
+        <input type="text" id="titre" placeholder="Titre de l'article (optionnel)" />
+      </div>
+      <div class="field">
+        <label for="contenu">Contenu *</label>
+        <textarea id="contenu" rows="7" placeholder="Collez ici le texte de l'article à analyser..."></textarea>
+      </div>
+      <button id="btn-analyse" onclick="lancerAnalyse()">Analyser</button>
+      <div class="loader" id="loader">⏳ Analyse en cours...</div>
+    </div>
+
+    <!-- RESULT -->
+    <div class="card" id="result-card">
+      <h2>Résultat</h2>
+
+      <div id="verdict-badge-wrap"></div>
+
+      <div class="score-wrap">
+        <div class="score-label" id="score-label">Score : —</div>
+        <div class="score-bar-bg">
+          <div class="score-bar-fill" id="score-bar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <details open style="margin-bottom:1rem">
+        <summary style="cursor:pointer;font-weight:600;font-size:.9rem;margin-bottom:.5rem">Détail du scoring</summary>
+        <ul class="detail-list" id="detail-list"></ul>
+      </details>
+
+      <details style="margin-bottom:1rem">
+        <summary style="cursor:pointer;font-weight:600;font-size:.9rem;margin-bottom:.5rem">Indicateurs NLP</summary>
+        <div class="ind-grid" id="ind-grid"></div>
+      </details>
+
+      <details id="sim-section">
+        <summary style="cursor:pointer;font-weight:600;font-size:.9rem;margin-bottom:.5rem">Articles de référence similaires</summary>
+        <div id="sim-list"></div>
+      </details>
+    </div>
+
+  </div>
+
+  <!-- TAB : HISTORIQUE -->
+  <div id="tab-historique" class="tab-panel">
+    <div class="card">
+      <h2>Historique des analyses</h2>
+      <div id="hist-list"><em style="color:#5A5A5A">Chargement...</em></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // ===== STATUS =====
+  async function checkStatus() {
+    try {
+      const r = await fetch('/status');
+      const d = await r.json();
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('status-txt');
+      if (d.db_available) {
+        dot.className = 'ok';
+        txt.textContent = d.similarity_available ? 'Système opérationnel' : 'DB OK — similarité indisponible';
+      } else {
+        dot.style.background = '#B23A3A';
+        txt.textContent = 'Base de données indisponible';
+      }
+    } catch { /* silently fail */ }
+  }
+  checkStatus();
+
+  // ===== TABS =====
+  function switchTab(name) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    event.currentTarget.classList.add('active');
+    if (name === 'historique') loadHistorique();
+  }
+
+  // ===== ANALYSE =====
+  async function lancerAnalyse() {
+    const contenu = document.getElementById('contenu').value.trim();
+    if (!contenu) { alert('Veuillez saisir un texte à analyser.'); return; }
+
+    const btn = document.getElementById('btn-analyse');
+    const loader = document.getElementById('loader');
+    btn.disabled = true;
+    loader.classList.add('show');
+    document.getElementById('result-card').style.display = 'none';
+
+    try {
+      const res = await fetch('/analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contenu })
+      });
+      const d = await res.json();
+      afficherResultat(d);
+    } catch(e) {
+      alert('Erreur de communication avec le serveur : ' + e.message);
+    } finally {
+      btn.disabled = false;
+      loader.classList.remove('show');
+    }
+  }
+
+  function afficherResultat(d) {
+    const card = document.getElementById('result-card');
+    card.style.display = 'block';
+
+    // Badge verdict
+    const badgeWrap = document.getElementById('verdict-badge-wrap');
+    badgeWrap.innerHTML = `<span class="verdict-badge verdict-${d.verdict}">${d.verdict}</span>`;
+
+    // Score bar
+    const bar = document.getElementById('score-bar');
+    bar.style.width = d.score + '%';
+    bar.className = 'score-bar-fill' + (d.score < 40 ? ' low' : d.score < 70 ? ' mid' : '');
+    document.getElementById('score-label').textContent = `Score : ${d.score}/100`;
+
+    // Detail
+    const dl = document.getElementById('detail-list');
+    dl.innerHTML = (d.detail || []).map(l => `<li>${l}</li>`).join('');
+
+    // Indicators
+    const ig = document.getElementById('ind-grid');
+    const ind = d.indicateurs || {};
+    ig.innerHTML = `
+      <div class="ind-item"><strong>${ind.nb_mots ?? '—'}</strong>Mots</div>
+      <div class="ind-item"><strong>${ind.nb_mots_uniques ?? '—'}</strong>Mots uniques</div>
+      <div class="ind-item"><strong>${ind.sources_presentes ? '✅ Oui' : '❌ Non'}</strong>Sources</div>
+      <div class="ind-item"><strong>${(ind.mots_suspects || []).length || 'Aucun'}</strong>Mots suspects</div>
+    `;
+
+    // Similarity
+    const sim = d.similarite || {};
+    const simList = document.getElementById('sim-list');
+    if (!sim.disponible || !(sim.correspondances || []).length) {
+      simList.innerHTML = '<em style="color:#5A5A5A;font-size:.85rem">Aucune correspondance disponible.</em>';
+    } else {
+      simList.innerHTML = sim.correspondances.map(c => `
+        <div class="sim-item">
+          <span class="sim-label ${c.label}">${c.label.toUpperCase()}</span>
+          <span>${c.titre}</span>
+          <span class="sim-pct">${Math.round(c.pourcentage)}%</span>
+        </div>
+      `).join('');
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ===== HISTORIQUE =====
+  async function loadHistorique() {
+    const container = document.getElementById('hist-list');
+    container.innerHTML = '<em style="color:#5A5A5A">Chargement...</em>';
+    try {
+      const res = await fetch('/historique');
+      const data = await res.json();
+      if (!data.length) {
+        container.innerHTML = '<em style="color:#5A5A5A">Aucune analyse enregistrée.</em>';
+        return;
+      }
+      container.innerHTML = data.map(h => `
+        <div class="hist-item">
+          <span class="hist-verdict ${h.verdict}">${h.verdict}</span>
+          <span class="hist-title">${h.titre}</span>
+          <span class="hist-score">${h.score}/100</span>
+          <span class="hist-date">${h.date}</span>
+        </div>
+      `).join('');
+    } catch(e) {
+      container.innerHTML = '<em style="color:#B23A3A">Erreur de chargement.</em>';
+    }
+  }
+
+  // Allow Ctrl+Enter to submit
+  document.getElementById('contenu').addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Enter') lancerAnalyse();
+  });
+</script>
+
+</body>
+</html>

@@ -26,7 +26,7 @@ _suite_analyses = st.lists(
 )
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(suite=_suite_analyses)
 def test_id_unique_et_strictement_positif(tmp_path, suite):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

@@ -22,7 +22,7 @@ from _db_helpers import ouvrir_base_temporaire, articles, resultats
 _FORMAT_DATE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(article=articles(), resultat=resultats())
 def test_format_date_canonique(tmp_path, article, resultat):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

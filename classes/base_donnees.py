@@ -157,10 +157,33 @@ class BaseDeDonnees:
             )
         """
 
+        # Table de référence des articles ÉTIQUETÉS (fake / real).
+        #
+        # Contrairement à "contenus_fiables", cette table porte une
+        # colonne "label" qui distingue strictement les articles
+        # "fake" des articles "real". Elle alimente le moteur de
+        # comparaison par similarité (TF-IDF + cosinus).
+        #
+        # La contrainte CHECK(label IN ('fake','real')) garantit au
+        # niveau du schéma qu'aucune étiquette hors de cet ensemble
+        # ne peut être stockée. La création reste idempotente
+        # (CREATE TABLE IF NOT EXISTS) : les lignes existantes sont
+        # préservées, jamais supprimées ni recréées.
+        sql_articles_reference = """
+            CREATE TABLE IF NOT EXISTS articles_reference (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                titre   TEXT NOT NULL,
+                contenu TEXT NOT NULL,
+                label   TEXT NOT NULL CHECK (label IN ('fake', 'real')),
+                source  TEXT NOT NULL DEFAULT 'Inconnue'
+            )
+        """
+
         try:
             curseur = self.connexion.cursor()
             curseur.execute(sql_analyses)
             curseur.execute(sql_contenus_fiables)
+            curseur.execute(sql_articles_reference)
             # On valide la création des tables.
             self.connexion.commit()
         except sqlite3.Error as e:
@@ -408,6 +431,82 @@ class BaseDeDonnees:
             )
 
     # ---------------------------------------------------------
+    #  ajouter_article_reference : alimente la référence étiquetée
+    # ---------------------------------------------------------
+    #  Insère un article ÉTIQUETÉ (fake / real) dans la table
+    #  "articles_reference". Ces articles servent de RÉFÉRENCE au
+    #  moteur de comparaison par similarité (TF-IDF + cosinus).
+    #
+    #  Entrées :
+    #    titre   : titre de l'article (non vide après strip).
+    #    contenu : texte de l'article (non vide après strip).
+    #    label   : étiquette appartenant STRICTEMENT à {fake, real}.
+    #    source  : sujet/source ; absente -> "Inconnue".
+    #
+    #  Validations (avant toute écriture) :
+    #    - label hors de {fake, real}  -> ErreurBaseDeDonnees ;
+    #    - titre OU contenu vide après strip -> ErreurBaseDeDonnees.
+    #  Dans ces deux cas, AUCUNE ligne n'est écrite.
+    #
+    #  Sortie : l'identifiant créé (entier strictement positif).
+    #  commit() en cas de succès, rollback() + ErreurBaseDeDonnees
+    #  en cas d'échec SQLite (aucune ligne partielle ne subsiste).
+
+    def ajouter_article_reference(self, titre, contenu, label, source=None):
+        """Ajoute un article de référence étiqueté dans
+        `articles_reference`.
+
+        Valide le label ({fake, real}) et le caractère non vide du
+        titre et du contenu (après strip), normalise la source
+        absente en "Inconnue", écrit en transactionnel et retourne
+        l'identifiant strictement positif de la ligne créée.
+        """
+
+        # --- Validation de l'étiquette ---
+        # Le label doit appartenir STRICTEMENT à l'ensemble autorisé.
+        # On rejette toute autre valeur AVANT d'écrire quoi que ce soit.
+        if label not in ("fake", "real"):
+            raise ErreurBaseDeDonnees(
+                f"Ajout d'un article de référence : étiquette invalide "
+                f"({label!r}), elle doit appartenir à {{'fake', 'real'}}"
+            )
+
+        # --- Validation du titre et du contenu ---
+        # Un titre ou un contenu vide après suppression des espaces
+        # est rejeté (aucune ligne ne doit être écrite). On gère aussi
+        # le cas None pour rester robuste.
+        if titre is None or str(titre).strip() == "":
+            raise ErreurBaseDeDonnees(
+                "Ajout d'un article de référence : titre vide"
+            )
+        if contenu is None or str(contenu).strip() == "":
+            raise ErreurBaseDeDonnees(
+                "Ajout d'un article de référence : contenu vide"
+            )
+
+        # Source normalisée comme pour les analyses / contenus fiables.
+        source = self._normaliser_source(source)
+
+        sql = """
+            INSERT INTO articles_reference (titre, contenu, label, source)
+            VALUES (?, ?, ?, ?)
+        """
+
+        try:
+            curseur = self.connexion.cursor()
+            curseur.execute(sql, (titre, contenu, label, source))
+            self.connexion.commit()
+            return curseur.lastrowid
+        except sqlite3.Error as e:
+            try:
+                self.connexion.rollback()
+            except sqlite3.Error:
+                pass
+            raise ErreurBaseDeDonnees(
+                f"Ajout d'un article de référence : échec de l'écriture ({e})"
+            )
+
+    # ---------------------------------------------------------
     #  recuperer_contenus_fiables : lit la base de référence
     # ---------------------------------------------------------
     #  Sortie : liste de dict {id, titre, contenu, source}.
@@ -440,6 +539,168 @@ class BaseDeDonnees:
             })
 
         return contenus
+
+    # ---------------------------------------------------------
+    #  ajouter_articles_reference_par_lot : insertion EN MASSE
+    # ---------------------------------------------------------
+    #  Insère PLUSIEURS articles de référence en UNE SEULE
+    #  transaction (un seul commit). C'est l'API à privilégier pour
+    #  un import volumineux (jeu ISOT : des dizaines de milliers de
+    #  lignes) : un commit par ligne forcerait autant de flushs
+    #  disque (fsync) et rendrait l'import extrêmement lent.
+    #
+    #  Entrée :
+    #    articles : itérable de tuples (titre, contenu, label, source).
+    #               source peut être None (normalisée en "Inconnue").
+    #
+    #  Validation : chaque ligne dont le label n'appartient pas à
+    #  {fake, real} ou dont le titre/contenu est vide après strip est
+    #  IGNORÉE (comptée dans "ignorees") plutôt que de faire échouer
+    #  tout le lot. On ne lève donc pas pour une ligne invalide.
+    #
+    #  Sortie : un dict {"inserees": int, "ignorees": int}.
+    #
+    #  Comportement transactionnel : commit() unique en fin de lot ;
+    #  en cas d'erreur SQLite, rollback() complet puis
+    #  ErreurBaseDeDonnees (aucune ligne partielle ne subsiste).
+
+    def ajouter_articles_reference_par_lot(self, articles):
+        """Insère un lot d'articles de référence en une transaction.
+
+        Les lignes invalides (label hors {fake, real}, titre/contenu
+        vide après strip) sont ignorées et comptées. Retourne un dict
+        {inserees, ignorees}. commit unique en cas de succès ;
+        rollback + ErreurBaseDeDonnees en cas d'échec SQLite.
+        """
+
+        sql = """
+            INSERT INTO articles_reference (titre, contenu, label, source)
+            VALUES (?, ?, ?, ?)
+        """
+
+        # On prépare d'abord toutes les valeurs valides en mémoire :
+        # les lignes invalides sont écartées sans interrompre le lot.
+        valeurs = []
+        ignorees = 0
+        for titre, contenu, label, source in articles:
+            if label not in ("fake", "real"):
+                ignorees += 1
+                continue
+            if titre is None or str(titre).strip() == "":
+                ignorees += 1
+                continue
+            if contenu is None or str(contenu).strip() == "":
+                ignorees += 1
+                continue
+            valeurs.append(
+                (titre, contenu, label, self._normaliser_source(source))
+            )
+
+        if not valeurs:
+            # Rien à insérer : aucune écriture, aucun commit nécessaire.
+            return {"inserees": 0, "ignorees": ignorees}
+
+        try:
+            curseur = self.connexion.cursor()
+            # executemany + commit UNIQUE : une seule transaction pour
+            # tout le lot (rapide même sur des dizaines de milliers de
+            # lignes).
+            curseur.executemany(sql, valeurs)
+            self.connexion.commit()
+            return {"inserees": len(valeurs), "ignorees": ignorees}
+        except sqlite3.Error as e:
+            try:
+                self.connexion.rollback()
+            except sqlite3.Error:
+                pass
+            raise ErreurBaseDeDonnees(
+                f"Ajout d'articles de référence par lot : "
+                f"échec de l'écriture ({e})"
+            )
+
+    # ---------------------------------------------------------
+    #  recuperer_articles_reference : lit la référence étiquetée
+    # ---------------------------------------------------------
+    #  Retourne TOUS les articles de la table "articles_reference"
+    #  destinés au moteur de comparaison par similarité.
+    #
+    #  Tri : par id croissant (ORDER BY id), comme pour les
+    #  contenus fiables, afin d'obtenir un ordre déterministe.
+    #
+    #  Sortie : liste de dict {id, titre, contenu, label, source}.
+    #           Liste vide si aucun article de référence n'a été
+    #           enregistré (Req. 4.8).
+
+    def recuperer_articles_reference(self):
+        """Retourne la liste des articles de référence étiquetés.
+
+        Chaque entrée est un dict {id, titre, contenu, label,
+        source}. La liste est vide lorsqu'aucun article de
+        référence n'a été enregistré. Une erreur SQLite est
+        encapsulée dans ErreurBaseDeDonnees.
+        """
+
+        sql = """
+            SELECT id, titre, contenu, label, source
+            FROM articles_reference
+            ORDER BY id
+        """
+
+        try:
+            curseur = self.connexion.cursor()
+            curseur.execute(sql)
+            lignes = curseur.fetchall()
+        except sqlite3.Error as e:
+            raise ErreurBaseDeDonnees(
+                f"Récupération des articles de référence : "
+                f"échec de la lecture ({e})"
+            )
+
+        articles = []
+        for ligne in lignes:
+            articles.append({
+                "id":      ligne[0],
+                "titre":   ligne[1],
+                "contenu": ligne[2],
+                "label":   ligne[3],
+                "source":  ligne[4],
+            })
+
+        return articles
+
+    # ---------------------------------------------------------
+    #  compter_articles_reference : nombre d'articles de référence
+    # ---------------------------------------------------------
+    #  Méthode utilitaire : retourne le nombre de lignes présentes
+    #  dans la table "articles_reference". Utile pour le réimport,
+    #  les tests, et la détection d'une référence vide (un retour
+    #  de 0 signifie qu'aucune comparaison par similarité n'est
+    #  possible).
+    #
+    #  Sortie : entier >= 0 (0 si la référence est vide).
+
+    def compter_articles_reference(self):
+        """Retourne le nombre d'articles de référence enregistrés.
+
+        Retourne 0 lorsque la table est vide. Une erreur SQLite est
+        encapsulée dans ErreurBaseDeDonnees.
+        """
+
+        sql = "SELECT COUNT(*) FROM articles_reference"
+
+        try:
+            curseur = self.connexion.cursor()
+            curseur.execute(sql)
+            ligne = curseur.fetchone()
+        except sqlite3.Error as e:
+            raise ErreurBaseDeDonnees(
+                f"Comptage des articles de référence : "
+                f"échec de la lecture ({e})"
+            )
+
+        # fetchone() sur un COUNT(*) retourne toujours une ligne
+        # (ex. (0,)) ; on extrait le premier champ.
+        return ligne[0]
 
     # ---------------------------------------------------------
     #  fermer : ferme la connexion SQLite active

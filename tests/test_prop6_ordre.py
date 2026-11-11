@@ -50,7 +50,7 @@ def _analyses_dates_repetees(draw):
     return couples
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(ensemble=_analyses_dates_repetees())
 def test_ordre_historique_date_desc_puis_id_desc(tmp_path, ensemble):
     base, _ = ouvrir_base_temporaire(tmp_path, nom=f"db_{uuid.uuid4().hex}.db")

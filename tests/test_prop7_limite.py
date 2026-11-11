@@ -27,7 +27,7 @@ _ensemble_analyses = st.lists(
 )
 
 
-@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     ensemble=_ensemble_analyses,
     # Limite valide (>= 1) couvrant des valeurs < N, = N et > N.

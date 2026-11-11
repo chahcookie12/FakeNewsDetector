@@ -51,16 +51,37 @@ class Score:
     SEUIL_FAKE    = 40
     SEUIL_DOUTEUX = 70
 
+    # Bornes de l'ajustement de similarité (bonus/malus)
+    # L'ajustement transmis par le MoteurSimilarite est ramené dans
+    # cet intervalle avant d'être appliqué (exigence 7.1).
+    AJUSTEMENT_SIMILARITE_MIN = -20
+    AJUSTEMENT_SIMILARITE_MAX =  20
+
     # ---------------------------------------------------------
     #  calculer : produit le score à partir des indicateurs
     # ---------------------------------------------------------
     #  Entrée  : le dictionnaire retourné par Analyseur.analyser()
+    #            + (optionnel) l'ajustement de similarité produit par
+    #              MoteurSimilarite (champ ajustement_score du
+    #              Resultat_Similarite), avec éventuellement de quoi
+    #              composer la ligne explicative :
+    #                - etiquette_dominante : "fake"/"real" dominante
+    #                  des meilleures correspondances ;
+    #                - meilleur_pourcentage : % de la meilleure
+    #                  correspondance.
     #  Sortie  : un dictionnaire avec score, verdict et détail
     #
     #  On retourne un dict plutôt qu'un simple entier pour
     #  pouvoir expliquer le résultat à l'utilisateur.
+    #
+    #  ajustement_score est OPTIONNEL (0 par défaut) : les appelants
+    #  existants qui ne passent que les indicateurs obtiennent
+    #  exactement le même score qu'avant (résultat identique au bit
+    #  près). La couche de similarité ne s'applique que lorsque
+    #  l'ajustement, une fois borné à [-20, +20], est non nul.
 
-    def calculer(self, indicateurs):
+    def calculer(self, indicateurs, ajustement_score=0,
+                 etiquette_dominante=None, meilleur_pourcentage=None):
 
         score  = self.SCORE_BASE
         detail = []   # liste des ajustements appliqués
@@ -158,11 +179,36 @@ class Score:
             )
 
         # -------------------------------------------------
+        #  RÈGLE 6 : ajustement de similarité → BONUS ou MALUS
+        # -------------------------------------------------
+        #  Si le MoteurSimilarite a comparé l'article à la base de
+        #  référence, on intègre son signal AVANT le clamp [0, 100].
+        #  - Indisponible / pas de données / ajustement nul : on ne
+        #    touche à rien (score calculé exactement comme avant,
+        #    aucune ligne de détail ajoutée — exigences 9.3, 10.2).
+        #  - Ajustement non nul : on l'applique borné à [-20, +20]
+        #    (exigence 7.1) et on ajoute UNE ligne explicative
+        #    (sens bonus/malus, étiquette dominante, pourcentage de
+        #    la meilleure correspondance — exigence 7.6).
+
+        ajustement = self._borner_ajustement(ajustement_score)
+
+        if ajustement != 0:
+            score += ajustement
+            detail.append(
+                self._detail_similarite(
+                    ajustement, etiquette_dominante, meilleur_pourcentage
+                )
+            )
+
+        # -------------------------------------------------
         #  Clamp : on force le score entre 0 et 100
         # -------------------------------------------------
         #  Sans ça, on pourrait avoir -10 ou 115.
         #  max(0, score) empêche d'aller en dessous de 0.
         #  min(100, ...) empêche de dépasser 100.
+        #  Le clamp s'applique APRÈS l'ajustement de similarité
+        #  (exigence 7.2).
 
         score = max(0, min(100, score))
 
@@ -192,6 +238,66 @@ class Score:
             return "DOUTEUX"
         else:
             return "FIABLE"
+
+    # ---------------------------------------------------------
+    #  _borner_ajustement : ramène l'ajustement dans [-20, +20]
+    # ---------------------------------------------------------
+    #  Entrée  : l'ajustement_score brut transmis par la couche de
+    #            similarité (entier, éventuellement None).
+    #  Sortie  : l'ajustement à appliquer, borné à [-20, +20].
+    #
+    #  Renvoie 0 (aucun effet) lorsque l'ajustement est absent
+    #  (None) ou nul : le score reste alors identique à l'analyse
+    #  textuelle seule quand la similarité n'apporte rien
+    #  (exigences 9.3, 10.2).
+
+    def _borner_ajustement(self, ajustement_score):
+
+        if not ajustement_score:
+            return 0
+
+        # On borne à [-20, +20] avant application (exigence 7.1).
+        return max(
+            self.AJUSTEMENT_SIMILARITE_MIN,
+            min(self.AJUSTEMENT_SIMILARITE_MAX, ajustement_score),
+        )
+
+    # ---------------------------------------------------------
+    #  _detail_similarite : ligne explicative de l'ajustement
+    # ---------------------------------------------------------
+    #  Entrée  : l'ajustement (non nul, déjà borné), l'étiquette
+    #            dominante des correspondances ("fake"/"real") et le
+    #            pourcentage de la meilleure correspondance.
+    #  Sortie  : une chaîne de détail cohérente avec le reste du
+    #            système de points (exigence 7.6).
+    #
+    #  La ligne indique le sens de l'ajustement (bonus +X / malus -X),
+    #  l'étiquette dominante des correspondances et le pourcentage de
+    #  la meilleure correspondance.
+
+    def _detail_similarite(self, ajustement, etiquette_dominante,
+                           meilleur_pourcentage):
+
+        # Étiquette dominante affichée en majuscules (FAKE/REAL).
+        # Valeur de repli neutre si l'information n'est pas fournie.
+        if etiquette_dominante:
+            etiquette = str(etiquette_dominante).upper()
+        else:
+            etiquette = "INCONNUE"
+
+        # Pourcentage de la meilleure correspondance (0 par défaut).
+        if meilleur_pourcentage is None:
+            meilleur_pourcentage = 0
+
+        # Signe explicite : + pour un bonus, - déjà porté par la valeur.
+        signe = "+" if ajustement > 0 else ""
+        sens  = "bonus" if ajustement > 0 else "malus"
+
+        return (
+            f"{signe}{ajustement} similarité ({sens}) : "
+            f"très proche d'un article {etiquette} "
+            f"({meilleur_pourcentage:.0f}% de correspondance)"
+        )
 
     # ---------------------------------------------------------
     #  afficher : affiche le résultat de façon lisible
